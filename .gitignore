@@ -1,0 +1,5 @@
+node_modules/
+*.docx
+create-prd.js
+generate-icons.js
+package-lock.json

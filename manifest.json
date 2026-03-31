@@ -1,0 +1,24 @@
+{
+  "name": "闪电单词 FlashWord",
+  "short_name": "闪电单词",
+  "description": "软件界面英语单词收集与记忆工具",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#D97757",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
