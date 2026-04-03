@@ -1,5 +1,5 @@
 // 闪电单词 Service Worker - 离线缓存
-const CACHE_NAME = 'flashword-v1';
+const CACHE_NAME = 'flashword-v2';
 
 // 需要缓存的本地资源
 const PRECACHE_URLS = [
