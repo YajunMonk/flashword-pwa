@@ -1129,9 +1129,14 @@ body::before {
     <div class="setting-status" id="arkStatus"></div>
   </div>
   <div class="setting-group">
-    <div class="setting-label">模型端点</div>
-    <div class="setting-desc">火山方舟的模型 Endpoint ID</div>
+    <div class="setting-label">模型端点 <span style="font-size:0.72rem;color:var(--ink-faint)">（文字翻译）</span></div>
+    <div class="setting-desc">火山方舟的文本模型 Endpoint ID，用于单词翻译</div>
     <input type="text" class="setting-input" id="arkModel" placeholder="ep-xxxxxxxx" oninput="saveArkSettings()">
+  </div>
+  <div class="setting-group">
+    <div class="setting-label">视觉模型端点 <span style="font-size:0.72rem;color:var(--ink-faint)">（截图识别）</span></div>
+    <div class="setting-desc">支持图片输入的模型，如 doubao-vision-pro 系列。留空则截图识别自动使用本地 Tesseract。</div>
+    <input type="text" class="setting-input" id="arkVisionModel" placeholder="ep-xxxxxxxx（视觉模型，选填）" oninput="saveArkSettings()">
   </div>
   <div class="setting-group">
     <button class="btn btn-primary btn-sm" onclick="testArkApi()">测试连接</button>
@@ -1302,7 +1307,8 @@ function getArkSettings() {
 function saveArkSettings() {
   const key = document.getElementById('arkApiKey').value.trim();
   const model = document.getElementById('arkModel').value.trim();
-  localStorage.setItem(ARK_SETTINGS_KEY, JSON.stringify({ key, model }));
+  const visionModel = document.getElementById('arkVisionModel').value.trim();
+  localStorage.setItem(ARK_SETTINGS_KEY, JSON.stringify({ key, model, visionModel }));
   const status = document.getElementById('arkStatus');
   status.textContent = key ? '已保存' : '';
   status.className = 'setting-status' + (key ? ' ok' : '');
@@ -1312,8 +1318,10 @@ function loadArkSettings() {
   const s = getArkSettings();
   const keyInput = document.getElementById('arkApiKey');
   const modelInput = document.getElementById('arkModel');
+  const visionInput = document.getElementById('arkVisionModel');
   if (keyInput && s.key) keyInput.value = s.key;
   if (modelInput && s.model) modelInput.value = s.model;
+  if (visionInput && s.visionModel) visionInput.value = s.visionModel;
 }
 
 async function testArkApi() {
@@ -1712,10 +1720,30 @@ async function processOcrImage(file) {
   const ark = getArkSettings();
   let text = '';
 
+  // 视觉模型优先（专门支持图片的端点），其次降级到 Tesseract
+  const visionModel = ark.visionModel?.trim();
+  const canUseVision = ark.key && visionModel;
+
+  const runTesseract = async () => {
+    setStatus('本地识别中（首次较慢，建议配置视觉模型端点）...');
+    const result = await Tesseract.recognize(file, 'eng', {
+      logger: (m) => {
+        if (m.status === 'recognizing text') {
+          const fill = document.getElementById('ocrFill');
+          if (fill) fill.style.width = Math.round(m.progress * 100) + '%';
+        }
+      }
+    });
+    return (result.data.words || [])
+      .filter(w => w.confidence >= 70 && /^[a-zA-Z]{3,}$/.test(w.text))
+      .map(w => w.text)
+      .join(' ');
+  };
+
   try {
-    if (ark.key && ark.model) {
-      // 优先用 AI 视觉识别：准确、快
-      setStatus('AI 识别中...');
+    if (canUseVision) {
+      // 用视觉模型识别
+      setStatus('AI 视觉识别中...');
       const base64 = await fileToBase64(file);
       const mimeType = file.type || 'image/jpeg';
 
@@ -1723,7 +1751,7 @@ async function processOcrImage(file) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ark.key}` },
         body: JSON.stringify({
-          model: ark.model,
+          model: visionModel,
           max_tokens: 400,
           messages: [{
             role: 'user',
@@ -1735,25 +1763,18 @@ async function processOcrImage(file) {
         })
       });
 
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data = await res.json();
-      text = data.choices?.[0]?.message?.content?.trim() || '';
+      if (!res.ok) {
+        // 400 = 模型不支持视觉；自动降级到 Tesseract
+        const hint = res.status === 400 ? '（视觉模型端点有误，已自动切换本地识别）' : `（API ${res.status}，已自动切换本地识别）`;
+        showToast(hint);
+        text = await runTesseract();
+      } else {
+        const data = await res.json();
+        text = data.choices?.[0]?.message?.content?.trim() || '';
+      }
     } else {
-      // 兜底：Tesseract 本地识别（慢，需下载模型）
-      setStatus('本地识别中（首次较慢，建议配置 API Key）...');
-      const result = await Tesseract.recognize(file, 'eng', {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            const fill = document.getElementById('ocrFill');
-            if (fill) fill.style.width = Math.round(m.progress * 100) + '%';
-          }
-        }
-      });
-      // 只保留置信度 ≥ 70 的单词，过滤噪声
-      text = (result.data.words || [])
-        .filter(w => w.confidence >= 70 && /^[a-zA-Z]{3,}$/.test(w.text))
-        .map(w => w.text)
-        .join(' ');
+      // 未配置视觉模型，直接用 Tesseract
+      text = await runTesseract();
     }
 
     progressDiv.style.display = 'none';
